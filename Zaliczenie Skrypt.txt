@@ -1,0 +1,280 @@
+if(!require(ggpubr)) {
+  install.packages("ggpubr")
+}
+if(!require(ggcorrplot)) {
+  install.packages("ggcorrplot")
+}
+if(!require(ggplot2)) {
+  install.packages("ggplot2")
+}
+library(ggplot2)
+library(ggcorrplot)
+library(ggpubr)
+library(car)
+library(FSA)
+library(dunn.test)
+table<-read.csv2("C:\\Users\\mjwoj\\OneDrive\\Pulpit\\ZaliczenieASD\\Przyklad.csv",sep= ";")
+naCells<- which (is.na(table),arr.ind = TRUE)
+
+#1
+for(i in 1:nrow(naCells)){
+  if(i==1){
+    cat("1 wartość to wiersz 2 wartość to kolumna","\n")
+  }
+  cat("brakuje danych w tej komórce",naCells[i,],"\n")
+}
+#Usuwanie wartości NA i zastępowanie ich średnią z kolumny
+for(i in 1:nrow(table)){
+  for(j in 1:ncol(table)){
+    if(is.na(table[i,j])){
+      cat("zmiana wartości w komórce",table[i,1],j,"z wartości ",table[i,j],"na ")
+      srednia <- mean(table[,j], na.rm = TRUE)
+      cat(srednia,"\n")
+      table[i,j] <- srednia
+    }
+  }
+}
+# Funkcja wartości odstających wraz z indeksami wierszy
+find_outliers <- function(x) {
+  q1 <- quantile(x, 0.25)
+  q3 <- quantile(x, 0.75)
+  iqr <- q3 - q1
+  lower_bound <- q1 - 1.5 * iqr
+  upper_bound <- q3 + 1.5 * iqr
+  outliers <- x < lower_bound | x > upper_bound
+  indexes <- which(outliers)
+  return(list(values = x[indexes], indexes = indexes))
+}
+parametry<-c()
+for(i in colnames(table)){
+  if(is.numeric(table[[i]])){
+    parametry<- c(parametry,i)
+  }else{
+    next
+  }
+}
+
+#Zidentyfikowanie wartości odstających dla wszystkich parametrów
+for (parametr in parametry) {
+  cat("Wartości odstające dla parametru", parametr, ":\n")
+  outliers <- find_outliers(table[[parametr]])
+  print(outliers$values)
+  cat("Indeksy wierszy, w których występują wartości odstające:\n")
+  print(outliers$indexes)
+  cat("\n")
+}
+
+#2
+grupy <- unique(table$grupa)
+charakterystyki_grup <- list()
+charakterystyka <- function(data) {
+  summary_data <- summary(data)
+  return(summary_data)
+}
+
+for(i in grupy){
+  grupa <- subset(table, grupa == i)
+  grupa <- grupa[, !names(grupa) %in% c("grupa", "plec")]
+  charakterystyki_grup[[i]] <- charakterystyka(grupa)
+}
+i<-1
+for(wynik_charakterystyki in charakterystyki_grup){
+  cat("Charakterystyka grupy ",grupy[i],"\n")
+  i<-i+1
+  print(wynik_charakterystyki)
+}
+
+#3
+result <- 1
+resultLev <- 1
+grupy <- unique(table$grupa)
+table$grupa <- as.factor(table$grupa)
+if(length(grupy)==2){
+  print("2 grupy")
+  for(i in parametry){
+    test_result <- shapiro.test(table[[i]])
+    if(test_result$p.value > 0.05){
+    }else{
+      result<-0
+    }
+  }
+  if(result == 0){
+    # Test Wilcoxona (Manna-Whitneya)
+    print("Rozkład Normalny NIE")
+    print("Test Wilcoxona (Manna-Whitneya)")
+    for(nameColumn in parametry){
+      wilcox_result <- wilcox.test(table[[nameColumn]] ~ grupa, data = table)
+      p_value_wilcox <- wilcox_result$p.value
+      if (p_value_wilcox < 0.05){
+        cat("Istnieją istotne różnice między grupami dla", nameColumn,"\n")
+      } else {
+        cat("Brak istotnych różnic między grupami dla", nameColumn,"\n")
+      }
+      name <- paste(nameColumn, ".pdf", sep = "")
+      pdf(name)
+      boxplot(table[[nameColumn]] ~ table$grupa, main = paste("Wykres dla", nameColumn), xlab = "Grupa", ylab = "Wartość")
+      dev.off()
+    }
+  }else{
+    print("Rozkład Normalny TAK")
+    for(i in parametry){
+      leveneTestResult <- leveneTest(table[[i]] ~ grupa, data = table)
+      if(leveneTestResult$"Pr(>F)"[1] > 0.005){
+        next
+      }else{
+        resultLev<-0
+      }
+    }
+    if(resultLev == 1){
+      # Test t-Studenta dla grup niezależnych
+      print("jednorodność wariancji  tak")
+      print("Test t-Studenta")
+      for(nameColumn in parametry){
+        t_test_result <- t.test(table[[nameColumn]] ~ grupa, data = table, var.equal = TRUE)
+        p_value_t_test <- t_test_result$p.value
+        if (p_value_t_test < 0.05){
+          print(paste("Istnieją istotne różnice między grupami dla", nameColumn, "według testu t-Studenta."))
+        } else {
+          print(paste("Brak istotnych różnic między grupami dla", nameColumn, "według testu t-Studenta."))
+        }
+        name <- paste(nameColumn, ".pdf", sep = "")
+        pdf(name)
+        boxplot(table[[nameColumn]] ~ table$grupa, main = paste("Wykres dla", nameColumn), xlab = "Grupa", ylab = "Wartość")
+        dev.off()
+      }
+    }else{
+      # Test Welcha
+      print("jednorodność wariancji nie")
+      print("Test Welcha")
+      for(nameColumn in parametry){
+        welch_result <- t.test(table[[nameColumn]] ~ grupa, data = table, var.equal = FALSE)
+        p_value_welch <- welch_result$p.value
+        if (p_value_welch < 0.05){
+          print(paste("Istnieją istotne różnice między grupami dla", nameColumn, "według testu Welcha."))
+        } else {
+          print(paste("Brak istotnych różnic między grupami dla", nameColumn, "według testu Welcha."))
+        }
+        name <- paste(nameColumn, ".pdf", sep = "")
+        pdf(name)
+        boxplot(table[[nameColumn]] ~ table$grupa, main = paste("Wykres dla", nameColumn), xlab = "Grupa", ylab = "Wartość")
+        dev.off()
+      }
+    }
+  }
+}else{
+  print("Więcej niż 2 grupy")
+  for(i in parametry){
+    test_result <- shapiro.test(table[[i]])
+    if(test_result$p.value > 0.05){
+    }else{
+      result<-0
+    }
+  }
+  if(result == 0){
+    #Kruskal
+    print("Rozkład Normalny NIE")
+    print("Test Kruskala")
+    for(nameColumn in parametry){
+      kruskal_result <- kruskal.test(table[[nameColumn]] ~ grupa, data = table)
+      p_value <- kruskal_result$p.value
+      if (p_value < 0.05){
+        print(paste("Istnieją istotne różnice między grupami dla", nameColumn, "."))
+        dunn_result <- dunn.test(table[[nameColumn]], g=table$grupa, method="bonferroni")
+        print(dunn_result)
+      } else {
+        print(paste("Brak istotnych różnic między grupami dla", nameColumn, "."))
+      }
+      name <- paste(nameColumn, ".pdf", sep = "")
+      pdf(name)
+      boxplot(table[[nameColumn]] ~ table$grupa, main = paste("Wykres dla", nameColumn), xlab = "Grupa", ylab = "Wartość")
+      dev.off()
+    }
+  }else{
+    print("Rozkład Normalny TAK")
+    for(i in parametry){
+      leveneTestResult <- leveneTest(table[[i]] ~ grupa, data = table)
+      if(leveneTestResult$"Pr(>F)"[1] > 0.005){
+        next
+      }else{
+        resultLev<-0
+      }
+    }
+    if(resultLev == 1){
+      # Sprawdzenie istotności statystycznej testów ANOVA
+      print("jednorodność wariancji tak")
+      print("Test AVONA")
+      for(nameColumn in parametry){
+        anova_result <- aov(table[[nameColumn]] ~ grupa, data = table)
+        summary_result <- summary(anova_result)
+        p_value <- summary_result[[1]][["Pr(>F)"]][1]
+        if (p_value < 0.05){
+          print(paste("Istnieją istotne różnice między grupami dla", nameColumn, "."))
+          tukey_result <- TukeyHSD(anova_result)
+          print(tukey_result)
+        } else {
+          print(paste("Brak istotnych różnic między grupami dla", nameColumn, "."))
+        }
+        name <- paste(nameColumn, ".pdf", sep = "")
+        pdf(name)
+        boxplot(table[[nameColumn]] ~ table$grupa, main = paste("Wykres dla", nameColumn), xlab = "Grupa", ylab = "Wartość")
+        dev.off()
+      }
+    }else{
+      #Kruskal
+      print("Rozkład Normalny NIE")
+      print("Test Kruskala")
+      for(nameColumn in parametry){
+        kruskal_result <- kruskal.test(table[[nameColumn]] ~ grupa, data = table)
+        p_value <- kruskal_result$p.value
+        if (p_value < 0.05){
+          print(paste("Istnieją istotne różnice między grupami dla", nameColumn, "."))
+          dunn_result <- dunn.test(table[[nameColumn]], g=table$grupa, method="bonferroni")
+          print(dunn_result)
+        } else {
+          print(paste("Brak istotnych różnic między grupami dla", nameColumn, "."))
+        }
+        name <- paste(nameColumn, ".pdf", sep = "")
+        pdf(name)
+        boxplot(table[[nameColumn]] ~ table$grupa, main = paste("Wykres dla", nameColumn), xlab = "Grupa", ylab = "Wartość")
+        dev.off()
+      }
+    }
+  }
+}
+#4
+# Wykonanie analizy korelacji i wizualizacja
+for (grupa in grupy) {
+  cat("Analiza korelacji dla grupy", grupa, ":\n")
+  data_grupa <- subset(table, grupa == grupa)
+  data_grupa <- data_grupa[, names(data_grupa) %in% parametry]
+  cor_matrix <- cor(data_grupa, use = "pairwise.complete.obs")
+  print(cor_matrix)
+  cat("\n")
+  p_matrix <- matrix(nrow = ncol(data_grupa), ncol = ncol(data_grupa))
+  for(i in 1:ncol(data_grupa)){
+    for(j in 1:ncol(data_grupa)){
+      p_matrix[i,j] <- cor.test(data_grupa[,i], data_grupa[,j])$p.value
+    }
+  }
+  
+  significant_correlations <- p_matrix < 0.05
+  cat("Istotne statystycznie korelacje dla grupy", grupa, ":\n")
+  for(i in 1:nrow(significant_correlations)){
+    for(j in 1:ncol(significant_correlations)){
+      if(significant_correlations[i,j]){
+        cat("Parametry", names(data_grupa)[i], "i", names(data_grupa)[j], "są istotnie skorelowane.\n")
+        cat("Siła korelacji:", cor_matrix[i,j], "\n")
+        if(cor_matrix[i,j] > 0){
+          cat("Kierunek korelacji: dodatni\n")
+        } else {
+          cat("Kierunek korelacji: ujemny\n")
+        }
+      }
+    }
+  }
+  pdf(file = paste0("Wykres_korelacji_dla_grupy_", grupa, ".pdf"))
+  print(ggcorrplot(cor_matrix, hc.order = TRUE, type = "lower", 
+                   lab = TRUE, lab_size = 3, 
+                   title = paste("Wykres korelacji dla grupy", grupa)))
+  dev.off()
+}
